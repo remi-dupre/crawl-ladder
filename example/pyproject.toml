@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "crawl-example"
+version = "0.1.0"
+description = ""
+authors = ["Rémi Dupré <remi@dupre.io>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aiohttp = "*"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
