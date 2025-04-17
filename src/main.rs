@@ -62,10 +62,9 @@ async fn main() {
         .route("/ladder/", get(get_ladder))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{SERVER_PORT}"))
-        .await
-        .unwrap();
-
+    let bind_address = format!("0.0.0.0:{SERVER_PORT}");
+    tracing::info!("Listening on address {bind_address}");
+    let listener = tokio::net::TcpListener::bind(bind_address).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
