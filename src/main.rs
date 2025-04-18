@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
@@ -62,8 +63,8 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn build_token_response(token: Token<'_>, state: &AppState) -> TokenResponse {
-    let token_response_data = |token: Token<'_>| {
+fn build_token_response(token: Token, state: &AppState) -> TokenResponse {
+    let token_response_data = |token: Token| {
         let hex = token.as_hex();
         let url = format!("{}/crawl/{hex}/", state.public_url);
         TokenResponseData { token: hex, url }
@@ -85,12 +86,16 @@ async fn get_crawl(user: User, State(state): State<AppState>) -> (StatusCode, Js
 
 async fn get_crawl_with_token(
     user: User,
-    Path(token): Path<String>,
+    Path(token_str): Path<String>,
     State(state): State<AppState>,
-) -> (StatusCode, Json<TokenResponse>) {
-    let token = Token::validate_from_hex(&user, token.as_bytes()).unwrap();
+) -> axum::response::Response {
+    let token = Token::validate_from_hex(&user, token_str.as_bytes()).unwrap();
     token.compute().await;
     let resp = build_token_response(token, &state);
-    state.stats.made_request(user);
-    (StatusCode::OK, resp.into())
+
+    if state.stats.made_request(user, token) {
+        (StatusCode::GONE, "Token is already used").into_response()
+    } else {
+        (StatusCode::OK, Json(resp)).into_response()
+    }
 }

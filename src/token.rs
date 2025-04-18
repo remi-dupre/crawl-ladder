@@ -12,52 +12,42 @@ const MAX_CHILDREN: u8 = 8;
 const MIN_COMPUTE_TIME: f32 = 0.005;
 const MAX_COMPUTE_TIME: f32 = 1.0;
 
-#[derive(Debug)]
-pub struct Token<'u> {
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct Token {
     index: u8,
     source: u64,
-    user: &'u User,
-    nb_children: u8,
-    compute_time: Duration,
+    user_hash: u64,
 }
 
-impl<'u> Token<'u> {
-    pub fn new(index: u8, source: u64, user: &'u User) -> Self {
-        let mut rng = SmallRng::seed_from_u64(source);
-
-        let compute_time_sqrt = ((rng.sample::<f32, _>(StandardNormal) + 3.0) / 6.0)
-            .clamp(MIN_COMPUTE_TIME, MAX_COMPUTE_TIME);
-
+impl Token {
+    pub fn new(index: u8, source: u64, user: &User) -> Self {
         Self {
             index,
             source,
-            user,
-            nb_children: rng.random_range(1..MAX_CHILDREN),
-            compute_time: Duration::from_secs_f32(compute_time_sqrt.powi(2)),
+            user_hash: seahash::hash(user.id.as_bytes()),
         }
     }
 
     pub fn target(&self) -> u64 {
         let mut hash = seahash::SeaHasher::default();
         hash.write(SUPER_SECRET.as_bytes());
-        hash.write(self.user.id.as_bytes());
+        hash.write_u64(self.user_hash);
         hash.write_u8(self.index);
         hash.write_u64(self.source);
         seahash::hash(&hash.finish().to_le_bytes())
     }
 
-    pub fn from_user(user: &'u User) -> Self {
-        let source = seahash::hash(user.id.as_bytes());
-        Self::new(0, source, user)
+    pub fn from_user(user: &User) -> Self {
+        let mut rng = rand::rng();
+        Self::new(0, rng.random(), user)
     }
 
-    pub fn validate_from_hex(user: &'u User, val: &[u8]) -> Option<Self> {
+    pub fn validate_from_hex(user: &User, val: &[u8]) -> Option<Self> {
         let mut bytes = [0; 17];
         hex::decode_to_slice(val, &mut bytes).ok()?;
         let index = u8::from_le_bytes([bytes[0]]);
         let source = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
         let target = u64::from_le_bytes(bytes[9..].try_into().unwrap());
-
         let token = Self::new(index, source, user);
 
         if target != token.target() {
@@ -79,12 +69,25 @@ impl<'u> Token<'u> {
     }
 
     pub fn iter_children(&self) -> impl Iterator<Item = Token> {
+        let mut rng = SmallRng::seed_from_u64(self.source);
+        let nb_children = rng.random_range(1..=MAX_CHILDREN);
         let source = self.target();
-        (0..self.nb_children).map(move |index| Token::new(index, source, self.user))
+
+        (0..nb_children).map(move |index| Token {
+            index,
+            source,
+            user_hash: self.user_hash,
+        })
     }
 
     pub async fn compute(&self) {
-        tracing::trace!("Compute for {:?}", self.compute_time);
-        tokio::time::sleep(self.compute_time).await
+        let mut rng = SmallRng::seed_from_u64(self.source);
+
+        let compute_time_sqrt = ((rng.sample::<f32, _>(StandardNormal) + 3.0) / 6.0)
+            .clamp(MIN_COMPUTE_TIME, MAX_COMPUTE_TIME);
+
+        let compute_time = Duration::from_secs_f32(compute_time_sqrt.powi(2));
+        tracing::trace!("Compute for {compute_time:?}");
+        tokio::time::sleep(compute_time).await
     }
 }

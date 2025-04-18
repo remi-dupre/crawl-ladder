@@ -1,16 +1,33 @@
 use std::cmp::Ord;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
+use axum::response::IntoResponse;
 use dashmap::DashMap;
 use serde::Serialize;
 
+use crate::token::Token;
 use crate::user::User;
 
-#[derive(Default)]
+/// Max number of tokens that the server will keep in memory.
+const MAX_USER_TOKENS_CACHE: usize = 100_000;
+
 pub struct StatsCollectorUser {
     pub best_1m: usize,
     pub requests_1m: VecDeque<Instant>,
+    validated_tokens_queue: VecDeque<Token>,
+    validated_tokens_set: HashSet<Token>,
+}
+
+impl Default for StatsCollectorUser {
+    fn default() -> Self {
+        Self {
+            best_1m: 0,
+            requests_1m: VecDeque::new(),
+            validated_tokens_queue: VecDeque::with_capacity(MAX_USER_TOKENS_CACHE),
+            validated_tokens_set: HashSet::with_capacity(MAX_USER_TOKENS_CACHE),
+        }
+    }
 }
 
 impl StatsCollectorUser {
@@ -56,8 +73,29 @@ pub struct StatsCollector {
 }
 
 impl StatsCollector {
-    pub fn made_request(&self, user: User) {
-        self.user_stats.entry(user).or_default().made_request();
+    pub fn made_request(&self, user: User, token: Token) -> bool {
+        let mut user_stats = self.user_stats.entry(user).or_default();
+
+        if user_stats.validated_tokens_set.contains(&token) {
+            return true;
+        }
+
+        if MAX_USER_TOKENS_CACHE > 0 {
+            while user_stats.validated_tokens_set.len() >= MAX_USER_TOKENS_CACHE {
+                let popped_token = user_stats
+                    .validated_tokens_queue
+                    .pop_front()
+                    .expect("MAX_USER_TOKEN_CACHE is positive");
+
+                user_stats.validated_tokens_set.remove(&popped_token);
+            }
+
+            user_stats.validated_tokens_queue.push_back(token);
+            user_stats.validated_tokens_set.insert(token);
+        }
+
+        user_stats.made_request();
+        false
     }
 
     pub fn ladder(&self) -> Vec<LadderItem> {
