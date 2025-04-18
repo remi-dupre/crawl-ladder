@@ -14,8 +14,13 @@ use crate::stats::{LadderItem, StatsCollector};
 use crate::token::Token;
 use crate::user::User;
 
-const PUBLIC_URL: &str = "http://localhost:3000";
 const SERVER_PORT: u16 = 3000;
+
+#[derive(Clone, Default)]
+pub struct AppState {
+    pub public_url: String,
+    pub stats: Arc<StatsCollector>,
+}
 
 #[derive(Serialize)]
 pub struct ErrorResponse {
@@ -29,32 +34,21 @@ pub struct TokenResponseData {
     url: String,
 }
 
-impl From<Token<'_>> for TokenResponseData {
-    fn from(value: Token) -> Self {
-        let hex = value.as_hex();
-        let url = format!("{PUBLIC_URL}/crawl/{hex}/");
-        Self { token: hex, url }
-    }
-}
-
 #[derive(Serialize)]
 pub struct TokenResponse {
     root: TokenResponseData,
     children: Vec<TokenResponseData>,
 }
 
-impl From<Token<'_>> for TokenResponse {
-    fn from(value: Token<'_>) -> Self {
-        let children = value.iter_children().map(Into::into).collect();
-        let root = value.into();
-        Self { root, children }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let state = Arc::new(StatsCollector::default());
+    let public_url = std::env::var("PUBLIC_URL").expect("missing env variable 'PUBLIC_URL'");
+
+    let state = AppState {
+        public_url,
+        stats: Default::default(),
+    };
 
     let app = Router::new()
         .route("/crawl/", get(get_crawl))
@@ -68,23 +62,35 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn get_ladder(State(stats): State<Arc<StatsCollector>>) -> Json<Vec<LadderItem>> {
-    stats.ladder().into()
+fn build_token_response(token: Token<'_>, state: &AppState) -> TokenResponse {
+    let token_response_data = |token: Token<'_>| {
+        let hex = token.as_hex();
+        let url = format!("{}/crawl/{hex}/", state.public_url);
+        TokenResponseData { token: hex, url }
+    };
+
+    let children = token.iter_children().map(token_response_data).collect();
+    let root = token_response_data(token);
+    TokenResponse { root, children }
 }
 
-async fn get_crawl(user: User) -> (StatusCode, Json<TokenResponse>) {
+async fn get_ladder(State(state): State<AppState>) -> Json<Vec<LadderItem>> {
+    state.stats.ladder().into()
+}
+
+async fn get_crawl(user: User, State(state): State<AppState>) -> (StatusCode, Json<TokenResponse>) {
     let token = Token::from_user(&user);
-    (StatusCode::OK, TokenResponse::from(token).into())
+    (StatusCode::OK, build_token_response(token, &state).into())
 }
 
 async fn get_crawl_with_token(
     user: User,
     Path(token): Path<String>,
-    State(stats): State<Arc<StatsCollector>>,
+    State(state): State<AppState>,
 ) -> (StatusCode, Json<TokenResponse>) {
     let token = Token::validate_from_hex(&user, token.as_bytes()).unwrap();
     token.compute().await;
-    let resp = TokenResponse::from(token);
-    stats.made_request(user);
+    let resp = build_token_response(token, &state);
+    state.stats.made_request(user);
     (StatusCode::OK, resp.into())
 }

@@ -4,7 +4,8 @@ import os
 
 import aiohttp
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = "https://crawl.dupre.io"
+# BASE_URL = "http://localhost:3000"
 MAX_PARALLEL = int(os.getenv("MAX_PARALLEL", 10000))
 
 
