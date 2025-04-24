@@ -1,9 +1,12 @@
+use aide::openapi::{Operation, Parameter, ParameterData};
+use aide::operation::{OperationInput, add_parameters};
 use axum::Json;
 use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::header::{HeaderMap, ToStrError};
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::ErrorResponse;
@@ -35,9 +38,40 @@ impl IntoResponse for UserError {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct User {
     pub id: String,
+}
+
+impl OperationInput for User {
+    fn operation_input(ctx: &mut aide::generate::GenContext, operation: &mut Operation) {
+        let s = ctx.schema.subschema_for::<String>();
+
+        add_parameters(
+            ctx,
+            operation,
+            [Parameter::Header {
+                parameter_data: ParameterData {
+                    name: "X-User".to_string(),
+                    description: None,
+                    required: true,
+                    format: aide::openapi::ParameterSchemaOrContent::Schema(
+                        aide::openapi::SchemaObject {
+                            json_schema: s,
+                            example: None,
+                            external_docs: None,
+                        },
+                    ),
+                    extensions: Default::default(),
+                    deprecated: None,
+                    example: None,
+                    examples: Default::default(),
+                    explode: None,
+                },
+                style: aide::openapi::HeaderStyle::Simple,
+            }],
+        );
+    }
 }
 
 impl std::fmt::Display for User {

@@ -4,14 +4,19 @@ pub mod user;
 
 use std::sync::Arc;
 
+use aide::NoApi;
+use aide::axum::routing::get;
+use aide::axum::{ApiRouter, IntoApiResponse};
+use aide::openapi::{Info, OpenApi};
+use aide::swagger::Swagger;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::{Extension, Json};
+use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::stats::{LadderItem, StatsCollector};
+use crate::stats::StatsCollector;
 use crate::token::Token;
 use crate::user::User;
 
@@ -23,19 +28,19 @@ pub struct AppState {
     pub stats: Arc<StatsCollector>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct ErrorResponse {
     error: String,
     message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct TokenResponseData {
     token: String,
     url: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct TokenResponse {
     root: TokenResponseData,
     children: Vec<TokenResponseData>,
@@ -51,19 +56,37 @@ async fn main() {
         stats: Default::default(),
     };
 
-    let app = Router::new()
-        .route("/crawl/", get(get_crawl))
-        .route("/crawl/{token}/", get(get_crawl_with_token))
-        .route("/ladder/", get(get_ladder))
+    let app = ApiRouter::new()
+        .api_route("/crawl/", get(get_crawl))
+        .api_route("/crawl/{token}/", get(get_crawl_with_token))
+        .api_route("/ladder/", get(get_ladder))
+        .route("/openapi.json", get(serve_api))
+        .route("/docs/", Swagger::new("/openapi.json").axum_route())
         .with_state(state);
+
+    let mut api = OpenApi {
+        info: Info {
+            description: Some("Some toy crawlable API".to_string()),
+            ..Info::default()
+        },
+        ..OpenApi::default()
+    };
 
     let bind_address = format!("0.0.0.0:{SERVER_PORT}");
     tracing::info!("Listening on address {bind_address}");
     let listener = tokio::net::TcpListener::bind(bind_address).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    axum::serve(
+        listener,
+        app.finish_api(&mut api)
+            .layer(Extension(api))
+            .into_make_service(),
+    )
+    .await
+    .unwrap();
 }
 
-fn build_token_response(token: Token, state: &AppState) -> TokenResponse {
+fn build_token_response(token: Token, state: AppState) -> TokenResponse {
     let token_response_data = |token: Token| {
         let hex = token.as_hex();
         let url = format!("{}/crawl/{hex}/", state.public_url);
@@ -75,13 +98,17 @@ fn build_token_response(token: Token, state: &AppState) -> TokenResponse {
     TokenResponse { root, children }
 }
 
-async fn get_ladder(State(state): State<AppState>) -> Json<Vec<LadderItem>> {
-    state.stats.ladder().into()
+async fn serve_api(Extension(api): Extension<OpenApi>) -> NoApi<Json<OpenApi>> {
+    NoApi(Json(api))
 }
 
-async fn get_crawl(user: User, State(state): State<AppState>) -> (StatusCode, Json<TokenResponse>) {
+async fn get_ladder(State(state): State<AppState>) -> impl IntoApiResponse {
+    Json(state.stats.ladder())
+}
+
+async fn get_crawl(user: User, State(state): State<AppState>) -> impl IntoApiResponse {
     let token = Token::from_user(&user);
-    (StatusCode::OK, build_token_response(token, &state).into())
+    (StatusCode::OK, Json(build_token_response(token, state)))
 }
 
 async fn get_crawl_with_token(
@@ -91,7 +118,7 @@ async fn get_crawl_with_token(
 ) -> axum::response::Response {
     let token = Token::validate_from_hex(&user, token_str.as_bytes()).unwrap();
     token.compute().await;
-    let resp = build_token_response(token, &state);
+    let resp = build_token_response(token, state.clone());
 
     if state.stats.made_request(user, token) {
         (StatusCode::GONE, "Token is already used").into_response()

@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aide = { version = "0.14", features = ["axum", "axum-json", "http", "redoc", "scalar", "swagger"] }
 axum = { version = "0.8.3", default-features = false, features = ["http1", "http2", "json", "tokio", "tracing"] }
 dashmap = "6"
 hex = "0.4"
 rand = "0.9"
 rand_distr = "0.5"
+schemars = "0.8"
 seahash = "4"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "net", "rt-multi-thread"] }

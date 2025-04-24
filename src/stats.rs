@@ -2,8 +2,8 @@ use std::cmp::Ord;
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use axum::response::IntoResponse;
 use dashmap::DashMap;
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::token::Token;
@@ -60,7 +60,7 @@ impl StatsCollectorUser {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct LadderItem {
     user: User,
     perf_1m: usize,
