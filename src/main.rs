@@ -120,5 +120,10 @@ async fn get_crawl_with_token(
 ) -> Json<TokenResponse> {
     let token = Token::validate_from_hex(&user, token_str.as_bytes()).unwrap();
     token.compute().await;
-    Json(build_token_response(token, state.clone()))
+
+    if state.stats.made_request(user, token) {
+        Json(TokenResponse::AlreadyUsed)
+    } else {
+        Json(build_token_response(token, state.clone()))
+    }
 }
