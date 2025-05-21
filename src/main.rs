@@ -10,8 +10,6 @@ use aide::axum::{ApiRouter, IntoApiResponse};
 use aide::openapi::{Info, OpenApi};
 use aide::swagger::Swagger;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -41,9 +39,13 @@ pub struct TokenResponseData {
 }
 
 #[derive(Serialize, JsonSchema)]
-pub struct TokenResponse {
-    root: TokenResponseData,
-    children: Vec<TokenResponseData>,
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub enum TokenResponse {
+    Valid {
+        root: TokenResponseData,
+        children: Vec<TokenResponseData>,
+    },
+    AlreadyUsed,
 }
 
 #[tokio::main]
@@ -95,7 +97,7 @@ fn build_token_response(token: Token, state: AppState) -> TokenResponse {
 
     let children = token.iter_children().map(token_response_data).collect();
     let root = token_response_data(token);
-    TokenResponse { root, children }
+    TokenResponse::Valid { root, children }
 }
 
 async fn serve_api(Extension(api): Extension<OpenApi>) -> NoApi<Json<OpenApi>> {
@@ -106,23 +108,17 @@ async fn get_ladder(State(state): State<AppState>) -> impl IntoApiResponse {
     Json(state.stats.ladder())
 }
 
-async fn get_crawl(user: User, State(state): State<AppState>) -> impl IntoApiResponse {
+async fn get_crawl(user: User, State(state): State<AppState>) -> Json<TokenResponse> {
     let token = Token::from_user(&user);
-    (StatusCode::OK, Json(build_token_response(token, state)))
+    Json(build_token_response(token, state))
 }
 
 async fn get_crawl_with_token(
     user: User,
     Path(token_str): Path<String>,
     State(state): State<AppState>,
-) -> axum::response::Response {
+) -> Json<TokenResponse> {
     let token = Token::validate_from_hex(&user, token_str.as_bytes()).unwrap();
     token.compute().await;
-    let resp = build_token_response(token, state.clone());
-
-    if state.stats.made_request(user, token) {
-        (StatusCode::GONE, "Token is already used").into_response()
-    } else {
-        (StatusCode::OK, Json(resp)).into_response()
-    }
+    Json(build_token_response(token, state.clone()))
 }

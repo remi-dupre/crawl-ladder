@@ -4,8 +4,8 @@ import os
 
 import aiohttp
 
-BASE_URL = "https://crawl.dupre.io"
-# BASE_URL = "http://localhost:3000"
+from utils import server
+
 MAX_PARALLEL = int(os.getenv("MAX_PARALLEL", 10000))
 
 
@@ -22,11 +22,12 @@ async def crawl(http: aiohttp.ClientSession, urls: list[str]) -> list[str]:
 
 
 async def main():
-    urls = [BASE_URL + "/crawl/"]
+    urls = [server.BASE_URL + "/crawl/"]
 
     for _ in range(10**4):
         async with aiohttp.ClientSession(
-            headers={"X-User": os.getenv("USER", "remi-dupre")}
+            headers={"X-User": os.getenv("USER", "remi-dupre")},
+            proxy="http://localhost:3128",
         ) as http:
             print(f"Fetch {len(urls)} urls")
             urls = await crawl(http, urls)
