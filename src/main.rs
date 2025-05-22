@@ -46,6 +46,7 @@ pub enum TokenResponse {
         children: Vec<TokenResponseData>,
     },
     AlreadyUsed,
+    InvalidToken,
 }
 
 #[tokio::main]
@@ -118,7 +119,10 @@ async fn get_crawl_with_token(
     Path(token_str): Path<String>,
     State(state): State<AppState>,
 ) -> Json<TokenResponse> {
-    let token = Token::validate_from_hex(&user, token_str.as_bytes()).unwrap();
+    let Some(token) = Token::validate_from_hex(&user, token_str.as_bytes()) else {
+        return Json(TokenResponse::InvalidToken);
+    };
+
     token.compute().await;
 
     if state.stats.made_request(user, token) {
